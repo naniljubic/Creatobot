@@ -1,0 +1,156 @@
+#################################
+###### Creatobot ####
+#################################
+
+
+import regex as re
+import requests
+from urllib.request import urlopen
+from bs4 import BeautifulSoup
+
+user='Creatobot'
+passw='creatobot_mdp'
+baseurl='http://wikipast.epfl.ch/wikipast/'
+summary='Wikipastbot Creatobot'
+
+        
+#Accès aux biographies du wikipast
+response=urlopen("http://wikipast.epfl.ch/wikipast/index.php/Biographies")
+page_source=response.read()
+soup=BeautifulSoup(page_source,'html.parser')
+biographies=[]
+for primitive in soup.findAll("table"):
+    for cap_and_count in primitive.findAll("td"):
+        for text in cap_and_count.findAll("a"):
+            if text.string != None:
+                biographies.append(text.string)
+    
+##for i in range(len(biographies)):
+##    print(biographies[i])
+##print('\n'+str(len(biographies))+' Biographies dans la liste \n')
+
+
+
+# Login request
+payload={'action':'query','format':'json','utf8':'','meta':'tokens','type':'login'}
+r1=requests.post(baseurl + 'api.php', data=payload)
+
+#login confirm
+login_token=r1.json()['query']['tokens']['logintoken']
+payload={'action':'login','format':'json','utf8':'','lgname':user,'lgpassword':passw,'lgtoken':login_token}
+r2=requests.post(baseurl + 'api.php', data=payload, cookies=r1.cookies)
+
+#get edit token2
+params3='?format=json&action=query&meta=tokens&continue='
+r3=requests.get(baseurl + 'api.php' + params3, cookies=r2.cookies)
+edit_token=r3.json()['query']['tokens']['csrftoken']
+
+edit_cookie=r2.cookies.copy()
+edit_cookie.update(r3.cookies)
+
+#récupération du texte dans la page voulue:
+title = 'Iossif Ermoliev' #il faut remplacer par biographie[i] ici pour tourné sur toutes les pages.
+result=requests.post(baseurl+'api.php?action=query&titles='+title+'&export&exportnowrap')
+soup=BeautifulSoup(result.text, "lxml")
+#prend la partie de la page qui est le texte
+lines = soup.find('page').find('text').text.split('\n')
+
+
+#code principal:
+def existInDictionnary(word):
+    if word.lower() in dictionnary and word not in prenoms:
+        return True
+    else:
+        return False
+    
+
+def onlyContainLetters(word):
+    if re.match("^[\w\d_-]*$", word) == None:
+        return False
+    else:
+        return True
+    
+def beginWithACapitalLetter(word):
+    if re.match("^[A-Z](.)*$", word) == None:
+        return False
+    else:
+        return True
+    
+def needBrackets(word1,word2):
+    #si les deux mots pas dans le dico, ne contiennent que des lettres et commencent pas une majuscule
+    return not existInDictionnary(word1) and not existInDictionnary(word2) and onlyContainLetters(word1) and onlyContainLetters(word2) and beginWithACapitalLetter(word1) and  beginWithACapitalLetter(word2)
+
+
+    
+#ouverture dictionnnaire       
+nom_fichier='C:/Users/nanil/Documents/6.Semester/Digital Humanities/Lexique382/Lexique382.txt'
+fichier=open(nom_fichier, encoding='utf-8')
+dictionnaryString=fichier.read()
+dictionnaryline = dictionnaryString.split('\n')
+dictionnary = []
+for line in dictionnaryline:
+    dictionnary.append(line.split('\t')[0])
+
+#recherche des prénoms francais sur wikipédia
+response=urlopen("https://fr.wikipedia.org/wiki/Liste_de_pr%C3%A9noms_fran%C3%A7ais_et_de_la_francophonie")
+page_source=response.read()
+soup=BeautifulSoup(page_source,'html.parser')
+prenoms=[]
+for dlTag in soup.findAll('dl'):
+        for ddTag in dlTag.findAll('dd'):
+            bTag = ddTag.find('b')
+            if bTag:
+                aTag = bTag.find('a')
+                if aTag:
+                    prenoms.append(aTag.string)
+
+
+
+#début algorithme
+newText = ''
+for line in lines:
+    words = line.split(" ")
+    if not re.match('^[=]{1,6}[\s]*' + soup.title.text + '[\s]*[=]{1,6}$', line):
+        i = 0
+        while i< len(words)-1:
+            #on cherche ceux qui ont déjà une balise pour les exclure
+            if re.match('[\[]{2}(.)*', words[i]): #début séquence avec [[
+                while not re.match('(.)*[\]]{2}', words[i]) and i<len(words)-1: #fin séquence ]]
+                    i += 1
+                i += 1
+            #on cherche ceux qui n'en ont pas et ou l'on veut en mettre (double mot pour l'instant)
+            else:
+                #rechercher de nom en deux mots:
+                doubleWord = words[i] + ' ' + words[i+1]
+                punctuationAfter = ''
+                punctuationBefore = ''
+                if re.match('^[\w\d_-]+(\p{P}){1,3}$',words[i+1]): #si on a une ponctuation après un mot
+                        punctuationAfter = re.search('[\p{P}]{1,3}$',words[i+1]).group()
+                        words[i+1] = re.sub('(\p{P}){1,3}$',"", words[i+1])
+                if re.match ('^[\w\d_-]{0,1}(\p{P}){1}[\w\d_-]+$',words[i]): #si on a une ponctuation avant un mot
+                        punctuationBefore = re.search('^[\w\d_-]{0,1}[\p{P}]{1}',words[i]).group()
+                        words[i] = re.sub('^[\w\d_-]{0,1}[\p{P}]{1}',"", words[i])
+                if doubleWord ==  soup.title.text or needBrackets(words[i],words[i+1]): #si c'est le titre ou si le test ok
+                    words[i] = '[[' + words[i]
+                    words[i] = punctuationBefore + words[i]
+                    words[i+1] = words[i+1] + ']]'
+                    words[i+1] = words[i+1] + punctuationAfter
+                i+=1
+    line = ' '.join(words)
+    newText += line + '\n'
+print(newText)
+
+
+
+
+
+##décommenter pour que le bot change la page wiki:
+
+payload={'action':'edit','assert':'user','format':'json','utf8':'','text':newText,'summary':summary,'title':title,'token':edit_token}
+r4=requests.post(baseurl+'api.php',data=payload,cookies=edit_cookie)
+print(r4.text)
+
+
+
+
+        
